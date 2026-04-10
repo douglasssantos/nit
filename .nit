@@ -19,13 +19,13 @@ RESET='\033[0m'
 # ========================
 
 ask() {
-  printf "  ${CYAN}?${RESET} ${BOLD}$1${RESET} ${DIM}›${RESET} " >&2
+  echo -en "  ${CYAN}?${RESET} ${BOLD}$1${RESET} ${DIM}›${RESET} " >&2
   read -r value
   echo "$value"
 }
 
 confirm() {
-  printf "  ${YELLOW}?${RESET} ${BOLD}$1${RESET} ${DIM}[y/N]${RESET} " >&2
+  echo -en "  ${YELLOW}?${RESET} ${BOLD}$1${RESET} ${DIM}[y/N]${RESET} " >&2
   read -r yn
   [[ "$yn" == "y" || "$yn" == "Y" ]]
 }
@@ -550,7 +550,7 @@ init_flow() {
     echo ""
   fi
 
-  local dir remote desc branch="main"
+  local dir remote desc branch
   dir=$(basename "$(pwd)")
 
   info "Diretório: ${BOLD}${CYAN}$dir${RESET}"
@@ -558,6 +558,9 @@ init_flow() {
 
   desc=$(ask "Mensagem do commit inicial ${DIM}(Enter para 'initial commit')${RESET}")
   [[ -z "$desc" ]] && desc="initial commit"
+
+  branch=$(ask "Branch principal ${DIM}(Enter para 'main')${RESET}")
+  [[ -z "$branch" ]] && branch="main"
 
   remote=$(ask "URL do repositório remoto ${DIM}(ex: git@github.com:user/$dir.git)${RESET}")
   [[ -z "$remote" ]] && abort "URL do remote é obrigatória."
