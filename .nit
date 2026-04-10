@@ -19,13 +19,13 @@ RESET='\033[0m'
 # ========================
 
 ask() {
-  printf "  ${CYAN}?${RESET} ${BOLD}$1${RESET} ${DIM}›${RESET} "
+  printf "  ${CYAN}?${RESET} ${BOLD}$1${RESET} ${DIM}›${RESET} " >&2
   read -r value
   echo "$value"
 }
 
 confirm() {
-  printf "  ${YELLOW}?${RESET} ${BOLD}$1${RESET} ${DIM}[y/N]${RESET} "
+  printf "  ${YELLOW}?${RESET} ${BOLD}$1${RESET} ${DIM}[y/N]${RESET} " >&2
   read -r yn
   [[ "$yn" == "y" || "$yn" == "Y" ]]
 }
