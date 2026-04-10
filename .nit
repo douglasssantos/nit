@@ -724,7 +724,7 @@ case "$1" in
     sep
 
     label "novo projeto"
-    echo -e "  ${GREEN}nit init${RESET}                   iniciar e publicar git"
+    echo -e "  ${GREEN}nit init${RESET}                   iniciar e publicar Repositório"
 
     label "commits"
     echo -e "  ${GREEN}feat${RESET} ${DIM}|${RESET} ${GREEN}fix${RESET} ${DIM}|${RESET} ${GREEN}docs${RESET} ${DIM}|${RESET} ${GREEN}refactor${RESET} ${DIM}|${RESET} ${GREEN}test${RESET} ${DIM}|${RESET} ${GREEN}chore${RESET} ${DIM}|${RESET} ${GREEN}perf${RESET} ${DIM}|${RESET} ${GREEN}style${RESET} ${DIM}|${RESET} ${GREEN}ci${RESET} ${DIM}|${RESET} ${GREEN}build${RESET}"
