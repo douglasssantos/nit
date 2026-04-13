@@ -6,7 +6,13 @@ CLI bash minimalista para simplificar o workflow com git — commits semânticos
 
 ## Instalação
 
-### Automática (recomendado)
+### Automática - Utilizando Curl (recomendado)
+
+```bash
+curl -L https://github.com/douglasssantos/nit/archive/refs/heads/main.zip -o nit.zip && unzip nit.zip && cd nit-main && sudo bash install.sh
+```
+
+### Automática - Clonando o Repositório
 
 ```bash
 bash install.sh
