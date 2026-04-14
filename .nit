@@ -95,6 +95,65 @@ branch_flow() {
 }
 
 # ========================
+# New Branch (seleção de escopo)
+# ========================
+
+new_branch_flow() {
+  local name
+  name=$(slugify "$*")
+
+  if [[ -z "$name" ]]; then
+    abort "Uso: nit new branch <nome>  →  ex: nit new branch adjusted-component"
+  fi
+
+  header "new branch"
+  info "Nome: ${BOLD}${CYAN}$name${RESET}"
+  echo ""
+  echo -e "  ${BOLD}Qual o escopo da branch?${RESET}"
+  echo ""
+
+  local scopes=(
+    feat
+    hotfix
+    bug
+    fix
+    enhancement
+    improvement
+    refactor
+    docs
+    test
+    chore
+    release
+    style
+    perf
+    ci
+    wip
+  )
+
+  local i=1
+  for scope in "${scopes[@]}"; do
+    printf "  ${CYAN}[%2d]${RESET} %s\n" "$i" "$scope"
+    ((i++))
+  done
+  echo ""
+
+  local choice scope_selected
+  choice=$(ask "Escopo")
+
+  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#scopes[@]} )); then
+    scope_selected="${scopes[$((choice-1))]}"
+  else
+    abort "Opção inválida."
+  fi
+
+  local branch="$scope_selected/$name"
+  echo ""
+  info "Branch: ${BOLD}${CYAN}$branch${RESET}"
+  echo ""
+  git checkout -b "$branch" && success "Branch ${BOLD}$branch${RESET} criada e ativa."
+}
+
+# ========================
 # Commit semântico
 # ========================
 
@@ -718,6 +777,22 @@ case "$1" in
     info_flow
   ;;
 
+  new)
+    if [[ "$2" == "branch" ]]; then
+      shift 2
+      new_branch_flow "$@"
+    else
+      error "Subcomando desconhecido: 'new $2'"
+      echo -e "  ${DIM}Uso: nit new branch <nome>${RESET}\n"
+      exit 1
+    fi
+  ;;
+
+  nb)
+    shift
+    new_branch_flow "$@"
+  ;;
+
   *)
     echo ""
     echo -e "  ${BOLD}${CYAN}NIT${RESET}  ${DIM}CLI GIT Workflow Simplify${RESET}"
@@ -737,6 +812,7 @@ case "$1" in
     label "branches"
     echo -e "  ${GREEN}nit branch${RESET}                 listar"
     echo -e "  ${GREEN}nit branch${RESET} ${DIM}<tipo> <nome>${RESET}   criar  ${DIM}→ ex: nit branch feat auth${RESET}"
+    echo -e "  ${GREEN}nit new branch${RESET} ${DIM}<nome>${RESET}      criar com seleção de escopo  ${DIM}(alias: nb)${RESET}"
     echo -e "  ${GREEN}nit checkout${RESET} ${DIM}<branch>${RESET}      trocar  ${DIM}(alias: co)${RESET}"
     echo -e "  ${GREEN}nit clean${RESET}                  remover branches mescladas"
 
