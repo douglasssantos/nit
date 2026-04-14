@@ -665,6 +665,204 @@ init_flow() {
 }
 
 # ========================
+# Rename (renomeia branch atual)
+# ========================
+
+rename_flow() {
+  local old_branch new_branch
+  old_branch=$(get_current_branch)
+  header "rename"
+  info "Branch atual: ${BOLD}${CYAN}$old_branch${RESET}"
+  echo ""
+  local new_name
+  new_name=$(ask "Novo nome")
+  [[ -z "$new_name" ]] && abort "Nome não pode ser vazio."
+  new_branch=$(slugify "$new_name")
+  echo ""
+  git branch -m "$old_branch" "$new_branch" && success "Branch renomeada para ${BOLD}$new_branch${RESET}."
+  if confirm "Atualizar remote também?"; then
+    git push origin --delete "$old_branch" 2>/dev/null || true
+    git push origin -u "$new_branch" && success "Remote atualizado."
+  fi
+}
+
+# ========================
+# Delete (deleta branch local)
+# ========================
+
+delete_branch_flow() {
+  local target="${1:-}"
+  header "delete branch"
+  if [[ -z "$target" ]]; then
+    echo ""
+    git branch
+    echo ""
+    target=$(ask "Branch para deletar")
+  fi
+  [[ -z "$target" ]] && abort "Nome não pode ser vazio."
+  local current
+  current=$(get_current_branch)
+  [[ "$target" == "$current" ]] && abort "Não é possível deletar a branch ativa."
+  echo ""
+  confirm "Deletar branch ${BOLD}$target${RESET}?" || exit 0
+  if git branch -d "$target"; then
+    success "Branch ${BOLD}$target${RESET} deletada."
+  else
+    warn "Branch não mesclada."
+    confirm "Forçar deleção com -D?" && git branch -D "$target" && success "Branch ${BOLD}$target${RESET} deletada (forçado)."
+  fi
+  echo ""
+  if confirm "Remover do remote também?"; then
+    git push origin --delete "$target" && success "Branch removida do remote."
+  fi
+}
+
+# ========================
+# Squash (une últimos N commits)
+# ========================
+
+squash_flow() {
+  header "squash"
+  info "Últimos 10 commits:"
+  echo ""
+  git log --oneline -10
+  echo ""
+  local n
+  n=$(ask "Quantos commits deseja unir?")
+  [[ "$n" =~ ^[0-9]+$ ]] || abort "Número inválido."
+  (( n >= 2 )) || abort "Precisa ser pelo menos 2."
+  local msg
+  msg=$(ask "Mensagem do commit final")
+  [[ -z "$msg" ]] && abort "Mensagem não pode ser vazia."
+  echo ""
+  confirm "Unir os últimos ${BOLD}$n${RESET} commits em um?" || exit 0
+  git reset --soft "HEAD~$n" && git commit -m "$msg" && success "Squash realizado: ${BOLD}$msg${RESET}."
+}
+
+# ========================
+# Open (abre repositório no browser)
+# ========================
+
+open_flow() {
+  header "open"
+  local remote_url
+  remote_url=$(git remote get-url origin 2>/dev/null) || abort "Remote 'origin' não encontrado."
+  local url
+  url=$(echo "$remote_url" \
+    | sed 's|git@github.com:|https://github.com/|' \
+    | sed 's|git@gitlab.com:|https://gitlab.com/|' \
+    | sed 's|\.git$||')
+  info "Abrindo: ${DIM}$url${RESET}"
+  echo ""
+  open "$url" 2>/dev/null || xdg-open "$url" 2>/dev/null || abort "Não foi possível abrir o browser."
+  success "Browser aberto."
+}
+
+# ========================
+# PR (cria Pull Request via GitHub CLI)
+# ========================
+
+pr_flow() {
+  header "pr"
+  command -v gh > /dev/null 2>&1 || abort "GitHub CLI (gh) não instalado. Veja: https://cli.github.com"
+  local branch
+  branch=$(get_current_branch)
+  info "Branch: ${BOLD}${CYAN}$branch${RESET}"
+  echo ""
+  local title body base
+  title=$(ask "Título do PR")
+  [[ -z "$title" ]] && abort "Título não pode ser vazio."
+  body=$(ask "Descrição ${DIM}(opcional)${RESET}")
+  base=$(ask "Branch base ${DIM}(Enter para 'main')${RESET}")
+  [[ -z "$base" ]] && base="main"
+  echo ""
+  info "Criando PR: ${BOLD}$title${RESET} → ${CYAN}$base${RESET}"
+  echo ""
+  gh pr create --title "$title" --body "${body:-}" --base "$base" && success "PR criado com sucesso."
+}
+
+# ========================
+# Contributors (lista contribuidores)
+# ========================
+
+contributors_flow() {
+  header "contributors"
+  echo ""
+  git shortlog -sn --all | head -20
+  echo ""
+}
+
+# ========================
+# Stats (estatísticas do repositório)
+# ========================
+
+stats_flow() {
+  header "stats"
+  echo ""
+  local total_commits branches tags contributors first_commit
+  total_commits=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+  branches=$(git branch -a | wc -l | tr -d ' ')
+  tags=$(git tag | wc -l | tr -d ' ')
+  contributors=$(git shortlog -sn --all | wc -l | tr -d ' ')
+  first_commit=$(git log --reverse --pretty=format:"%ar" | head -1)
+  echo -e "  ${BOLD}commits${RESET}         ${CYAN}$total_commits${RESET}"
+  echo -e "  ${BOLD}branches${RESET}        ${CYAN}$branches${RESET}"
+  echo -e "  ${BOLD}tags${RESET}            ${CYAN}$tags${RESET}"
+  echo -e "  ${BOLD}contribuidores${RESET}  ${CYAN}$contributors${RESET}"
+  echo -e "  ${BOLD}primeiro commit${RESET} ${DIM}$first_commit${RESET}"
+  sep
+  echo ""
+}
+
+# ========================
+# Backup (cria branch de backup)
+# ========================
+
+backup_flow() {
+  local branch timestamp backup
+  branch=$(get_current_branch)
+  timestamp=$(date +%Y%m%d-%H%M%S)
+  backup="backup/$branch-$timestamp"
+  header "backup"
+  info "Branch atual: ${BOLD}${CYAN}$branch${RESET}"
+  info "Backup:       ${BOLD}${CYAN}$backup${RESET}"
+  echo ""
+  git checkout -b "$backup" && git checkout "$branch" && success "Backup criado: ${BOLD}$backup${RESET}."
+}
+
+# ========================
+# Switch (troca branch com listagem interativa)
+# ========================
+
+switch_flow() {
+  header "switch"
+  echo ""
+  local branches
+  mapfile -t branches < <(git branch | sed 's/^[* ]*//')
+  [[ ${#branches[@]} -eq 0 ]] && abort "Nenhuma branch encontrada."
+  local current i=1
+  current=$(get_current_branch)
+  for b in "${branches[@]}"; do
+    if [[ "$b" == "$current" ]]; then
+      printf "  ${GREEN}[%2d]${RESET} ${BOLD}%s${RESET} ${DIM}← atual${RESET}\n" "$i" "$b"
+    else
+      printf "  ${CYAN}[%2d]${RESET} %s\n" "$i" "$b"
+    fi
+    ((i++))
+  done
+  echo ""
+  local choice
+  choice=$(ask "Branch")
+  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#branches[@]} )); then
+    local target="${branches[$((choice-1))]}"
+    echo ""
+    git checkout "$target" && success "Branch ativa: ${BOLD}$target${RESET}."
+  else
+    abort "Opção inválida."
+  fi
+}
+
+# ========================
 # Main
 # ========================
 
@@ -793,6 +991,42 @@ case "$1" in
     new_branch_flow "$@"
   ;;
 
+  rename)
+    rename_flow
+  ;;
+
+  delete|del)
+    delete_branch_flow "$2"
+  ;;
+
+  squash)
+    squash_flow
+  ;;
+
+  open)
+    open_flow
+  ;;
+
+  pr)
+    pr_flow
+  ;;
+
+  contributors|contrib)
+    contributors_flow
+  ;;
+
+  stats)
+    stats_flow
+  ;;
+
+  backup)
+    backup_flow
+  ;;
+
+  switch|sw)
+    switch_flow
+  ;;
+
   *)
     echo ""
     echo -e "  ${BOLD}${CYAN}NIT${RESET}  ${DIM}CLI GIT Workflow Simplify${RESET}"
@@ -813,19 +1047,28 @@ case "$1" in
     echo -e "  ${GREEN}nit branch${RESET}                 listar"
     echo -e "  ${GREEN}nit branch${RESET} ${DIM}<tipo> <nome>${RESET}   criar  ${DIM}→ ex: nit branch feat auth${RESET}"
     echo -e "  ${GREEN}nit new branch${RESET} ${DIM}<nome>${RESET}      criar com seleção de escopo  ${DIM}(alias: nb)${RESET}"
+    echo -e "  ${GREEN}nit rename${RESET}                 renomear branch atual"
+    echo -e "  ${GREEN}nit delete${RESET} ${DIM}<branch>${RESET}        deletar branch  ${DIM}(alias: del)${RESET}"
+    echo -e "  ${GREEN}nit switch${RESET}                 trocar branch interativo  ${DIM}(alias: sw)${RESET}"
     echo -e "  ${GREEN}nit checkout${RESET} ${DIM}<branch>${RESET}      trocar  ${DIM}(alias: co)${RESET}"
+    echo -e "  ${GREEN}nit backup${RESET}                 criar branch de backup"
     echo -e "  ${GREEN}nit clean${RESET}                  remover branches mescladas"
 
     label "sincronização"
     echo -e "  ${GREEN}nit push${RESET}                   push da branch atual"
     echo -e "  ${GREEN}nit pull${RESET}                   pull da branch atual"
     echo -e "  ${GREEN}nit sync${RESET}                   pull + push"
+    echo -e "  ${GREEN}nit open${RESET}                   abrir repositório no browser"
+    echo -e "  ${GREEN}nit pr${RESET}                     criar Pull Request ${DIM}(requer gh CLI)${RESET}"
 
     label "utilitários"
     echo -e "  ${GREEN}nit diff${RESET} ${DIM}[--staged|-s]${RESET}     ver alterações"
     echo -e "  ${GREEN}nit stash${RESET} ${DIM}[save|list|pop|drop|clear]${RESET}"
+    echo -e "  ${GREEN}nit squash${RESET}                 unir últimos N commits"
     echo -e "  ${GREEN}nit status${RESET}  ${DIM}(alias: st)${RESET}    git status"
     echo -e "  ${GREEN}nit info${RESET}                   branch + último commit + status"
+    echo -e "  ${GREEN}nit stats${RESET}                  estatísticas do repositório"
+    echo -e "  ${GREEN}nit contributors${RESET}           lista de contribuidores  ${DIM}(alias: contrib)${RESET}"
     echo -e "  ${GREEN}nit history${RESET}  ${DIM}(alias: log)${RESET}  log gráfico"
     echo -e "  ${GREEN}nit tag${RESET} ${DIM}[list|create|delete]${RESET}"
 

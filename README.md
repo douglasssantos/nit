@@ -156,17 +156,81 @@ nit branch fix corrigir-timeout
 
 O nome é automaticamente convertido para slug (lowercase, sem espaços).
 
+### Criar branch com seleção de escopo
+
+```bash
+nit new branch adjusted-component
+nit nb adjusted-component   # alias
+```
+
+Exibe uma lista numerada de escopos para escolher interativamente:
+
+```
+  Qual o escopo da branch?
+
+   [ 1] feat
+   [ 2] hotfix
+   [ 3] bug
+   [ 4] fix
+   [ 5] enhancement
+   [ 6] improvement
+   [ 7] refactor
+   [ 8] docs
+   [ 9] test
+   [10] chore
+   [11] release
+   [12] style
+   [13] perf
+   [14] ci
+   [15] wip
+
+  ? Escopo › 6
+  → git checkout -b improvement/adjusted-component
+```
+
 ### Listar branches
 
 ```bash
 nit branch
 ```
 
-### Trocar de branch
+### Trocar de branch (interativo)
+
+```bash
+nit switch   # lista branches numeradas para seleção
+nit sw       # alias
+```
+
+### Trocar de branch (direto)
 
 ```bash
 nit checkout fix/corrigir-timeout
 nit co fix/corrigir-timeout   # alias
+```
+
+### Renomear branch atual
+
+```bash
+nit rename
+# ? Novo nome › nova-feature
+# → renomeia localmente e oferece atualizar o remote
+```
+
+### Deletar branch
+
+```bash
+nit delete fix/corrigir-timeout
+nit del fix/corrigir-timeout   # alias
+# → confirmação antes de deletar; oferece remoção do remote
+# → se a branch não estiver mesclada, pergunta se deseja forçar com -D
+```
+
+### Criar branch de backup
+
+```bash
+nit backup
+# → cria: backup/<branch-atual>-<timestamp>
+# → volta automaticamente para a branch original
 ```
 
 ### Remover branches mescladas
@@ -185,6 +249,23 @@ nit clean
 nit push    # push da branch atual para origin
 nit pull    # pull da branch atual
 nit sync    # pull + push (sincronização completa)
+```
+
+### Abrir repositório no browser
+
+```bash
+nit open
+# Detecta automaticamente GitHub ou GitLab (SSH ou HTTPS)
+```
+
+### Criar Pull Request
+
+```bash
+nit pr
+# Requer GitHub CLI (gh) instalado: https://cli.github.com
+# ? Título do PR  ›
+# ? Descrição     ›
+# ? Branch base   › main
 ```
 
 ---
@@ -240,6 +321,14 @@ nit status    # git status completo
 nit st        # alias para status
 
 nit info      # painel: branch atual + hash + mensagem + autor + status colorido
+
+nit stats     # estatísticas: commits, branches, tags, contribuidores, data do primeiro commit
+
+nit squash    # une os últimos N commits em um único
+# Exibe os últimos 10 commits, solicita quantidade e mensagem final
+
+nit contributors   # lista contribuidores ordenados por número de commits
+nit contrib        # alias
 ```
 
 O `nit info` exibe o status dos arquivos com cores por tipo:
@@ -288,7 +377,9 @@ nit revert
 # Novo projeto do zero
 nit init
 
-# Criar branch para nova feature
+# Criar branch com seleção interativa de escopo
+nit new branch pagamento-pix
+# ou diretamente:
 nit branch feat pagamento-pix
 
 # Desenvolver...
@@ -306,37 +397,56 @@ nit feat "adicionar integração com API Pix"
 # Editar o commit se necessário
 nit amend
 
+# Unir commits antes de publicar
+nit squash
+
 # Sincronizar com remote
 nit sync
+
+# Abrir repositório para revisar
+nit open
+
+# Criar PR
+nit pr
 ```
 
 ---
 
 ## Referência rápida
 
-| Comando | Descrição |
-|---|---|
-| `nit init` | Inicializar e publicar Repositório |
-| `nit feat/fix/...` | Commit semântico |
-| `nit wip` | Commit rápido de WIP |
-| `nit amend` | Editar último commit |
-| `nit undo` | Desfazer último commit |
-| `nit branch` | Listar branches |
-| `nit branch <tipo> <nome>` | Criar branch tipada |
-| `nit checkout <branch>` / `nit co` | Trocar de branch |
-| `nit clean` | Remover branches mescladas |
-| `nit push` | Push da branch atual |
-| `nit pull` | Pull da branch atual |
-| `nit sync` | Pull + push |
-| `nit diff [--staged\|-s]` | Ver alterações |
-| `nit stash [save\|list\|pop\|drop\|clear]` | Gerenciar stash |
-| `nit status` / `nit st` | Git status |
-| `nit info` | Painel da branch atual |
-| `nit history` / `nit log` | Log gráfico |
-| `nit tag [list\|create\|delete]` | Gerenciar tags |
-| `nit cherry` | Cherry-pick assistido |
-| `nit reset` | Reset seguro |
-| `nit revert` | Reverter commit |
+| Comando | Alias | Descrição |
+|---|---|---|
+| `nit init` | — | Inicializar e publicar repositório |
+| `nit feat/fix/...` | — | Commit semântico |
+| `nit wip` | — | Commit rápido de WIP |
+| `nit amend` | — | Editar último commit |
+| `nit undo` | — | Desfazer último commit |
+| `nit squash` | — | Unir últimos N commits |
+| `nit branch` | — | Listar branches |
+| `nit branch <tipo> <nome>` | — | Criar branch tipada |
+| `nit new branch <nome>` | `nb` | Criar branch com seleção de escopo |
+| `nit switch` | `sw` | Trocar branch interativo |
+| `nit checkout <branch>` | `co` | Trocar de branch (direto) |
+| `nit rename` | — | Renomear branch atual |
+| `nit delete <branch>` | `del` | Deletar branch local |
+| `nit backup` | — | Criar branch de backup |
+| `nit clean` | — | Remover branches mescladas |
+| `nit push` | — | Push da branch atual |
+| `nit pull` | — | Pull da branch atual |
+| `nit sync` | — | Pull + push |
+| `nit open` | — | Abrir repositório no browser |
+| `nit pr` | — | Criar Pull Request (requer `gh`) |
+| `nit diff [--staged\|-s]` | — | Ver alterações |
+| `nit stash [save\|list\|pop\|drop\|clear]` | — | Gerenciar stash |
+| `nit status` | `st` | Git status |
+| `nit info` | — | Painel da branch atual |
+| `nit stats` | — | Estatísticas do repositório |
+| `nit contributors` | `contrib` | Lista de contribuidores |
+| `nit history` | `log` | Log gráfico |
+| `nit tag [list\|create\|delete]` | — | Gerenciar tags |
+| `nit cherry` | — | Cherry-pick assistido |
+| `nit reset` | — | Reset seguro |
+| `nit revert` | — | Reverter commit |
 
 ---
 
@@ -344,4 +454,5 @@ nit sync
 
 - bash 4+
 - git
+- [gh CLI](https://cli.github.com) *(opcional, necessário para `nit pr`)*
 
