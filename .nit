@@ -863,6 +863,387 @@ switch_flow() {
 }
 
 # ========================
+# Version / Release
+# ========================
+
+get_current_version() {
+  local version=""
+  if [[ -f "package.json" ]]; then
+    version=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' package.json | head -1 | grep -o '"[^"]*"$' | tr -d '"')
+  fi
+  if [[ -z "$version" ]] && [[ -f "composer.json" ]]; then
+    version=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' composer.json | head -1 | grep -o '"[^"]*"$' | tr -d '"')
+  fi
+  if [[ -z "$version" ]] && [[ -f "VERSION" ]]; then
+    version=$(cat VERSION | tr -d '[:space:]')
+  fi
+  if [[ -z "$version" ]] && [[ -f "version.txt" ]]; then
+    version=$(cat version.txt | tr -d '[:space:]')
+  fi
+  if [[ -z "$version" ]] && [[ -f "changelog.md" ]]; then
+    version=$(grep -o '\[[0-9][^]]*\]' changelog.md | head -1 | tr -d '[]')
+  fi
+  echo "$version"
+}
+
+increment_semver() {
+  local version="$1"
+  local bump="$2"
+  local major minor patch
+  IFS='.' read -r major minor patch <<< "$version"
+  major=${major:-0}; minor=${minor:-0}; patch=${patch:-0}
+  case "$bump" in
+    major) ((major++)); minor=0; patch=0 ;;
+    minor) ((minor++)); patch=0 ;;
+    patch) ((patch++)) ;;
+  esac
+  echo "$major.$minor.$patch"
+}
+
+update_version_in_file() {
+  local file="$1"
+  local old_ver="$2"
+  local new_ver="$3"
+  case "$file" in
+    package.json|package-lock.json|composer.json|app.json|manifest.json)
+      sed -i.bak "s/\"version\":[[:space:]]*\"${old_ver}\"/\"version\": \"${new_ver}\"/" "$file" && rm -f "${file}.bak"
+      ;;
+    pom.xml)
+      sed -i.bak "s|<version>${old_ver}</version>|<version>${new_ver}</version>|" "$file" && rm -f "${file}.bak"
+      ;;
+    build.gradle|gradle.properties|pyproject.toml|setup.py|Cargo.toml)
+      sed -i.bak "s/${old_ver}/${new_ver}/" "$file" && rm -f "${file}.bak"
+      ;;
+    VERSION|version.txt)
+      echo "$new_ver" > "$file"
+      ;;
+    .env)
+      sed -i.bak "s/VERSION=${old_ver}/VERSION=${new_ver}/" "$file" && rm -f "${file}.bak"
+      ;;
+    config/version.php)
+      sed -i.bak "s/'${old_ver}'/'${new_ver}'/" "$file" && rm -f "${file}.bak"
+      ;;
+  esac
+}
+
+update_changelog() {
+  local new_ver="$1"
+  local change_type="$2"
+  shift 2
+  local notes=("$@")
+  local today
+  today=$(date +%Y-%m-%d)
+
+  if [[ ! -f "changelog.md" ]]; then
+    {
+      echo "# Changelog"
+      echo ""
+      echo "Todas as alterações relevantes deste projeto serão documentadas neste arquivo."
+      echo ""
+    } > changelog.md
+  fi
+
+  local entry
+  entry="## [${new_ver}] - ${today}\n\n### Tipo\n${change_type}\n\n### Alterações\n"
+  for note in "${notes[@]}"; do
+    entry+="- ${note}\n"
+  done
+  entry+="\n"
+
+  local insert_line
+  insert_line=$(grep -n "^## \[" changelog.md | head -1 | cut -d: -f1)
+
+  local tmp
+  tmp=$(mktemp)
+
+  if [[ -n "$insert_line" ]]; then
+    head -n $((insert_line - 1)) changelog.md > "$tmp"
+    printf '%b' "$entry" >> "$tmp"
+    tail -n +"${insert_line}" changelog.md >> "$tmp"
+  else
+    cat changelog.md > "$tmp"
+    printf '\n%b' "$entry" >> "$tmp"
+  fi
+
+  mv "$tmp" changelog.md
+}
+
+version_flow() {
+  header "release"
+
+  # Etapa 1 — Versão atual
+  local current_version
+  current_version=$(get_current_version)
+
+  if [[ -z "$current_version" ]]; then
+    warn "Nenhuma versão encontrada nos arquivos do projeto. Usando 0.0.0 como base."
+    current_version="0.0.0"
+  else
+    info "Versão atual encontrada: ${BOLD}${CYAN}$current_version${RESET}"
+  fi
+  echo ""
+
+  # Etapa 3 — Tipo da alteração (antes para cálculo automático)
+  echo -e "  ${BOLD}Qual o tipo da alteração?${RESET}"
+  echo ""
+  local types=(bugfix hotfix enhancement feature project new-version change-breaking)
+  local i=1
+  for t in "${types[@]}"; do
+    printf "  ${CYAN}[%d]${RESET} %s\n" "$i" "$t"
+    ((i++))
+  done
+  echo ""
+
+  local type_choice change_type bump_type
+  type_choice=$(ask "Tipo")
+
+  if [[ "$type_choice" =~ ^[0-9]+$ ]] && (( type_choice >= 1 && type_choice <= ${#types[@]} )); then
+    change_type="${types[$((type_choice-1))]}"
+  else
+    abort "Opção inválida."
+  fi
+
+  case "$change_type" in
+    bugfix|hotfix)              bump_type="patch" ;;
+    enhancement|feature)        bump_type="minor" ;;
+    project|new-version|change-breaking) bump_type="major" ;;
+  esac
+
+  # Etapa 2 — Versão manual ou automática
+  echo ""
+  echo -e "  ${BOLD}Deseja informar manualmente a nova versão?${RESET}"
+  echo ""
+  echo -e "  ${CYAN}[1]${RESET} Sim"
+  echo -e "  ${CYAN}[2]${RESET} Não ${DIM}(calculada automaticamente)${RESET}"
+  echo ""
+  local manual_choice
+  manual_choice=$(ask "Opção")
+
+  local new_version
+  if [[ "$manual_choice" == "1" ]]; then
+    echo ""
+    new_version=$(ask "Informe a versão")
+    [[ -z "$new_version" ]] && abort "Versão não pode ser vazia."
+  else
+    if [[ "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      new_version=$(increment_semver "$current_version" "$bump_type")
+    else
+      new_version=$(increment_semver "0.0.0" "$bump_type")
+    fi
+  fi
+
+  echo ""
+  info "Versão Atual:  ${BOLD}$current_version${RESET}"
+  info "Tipo:          ${BOLD}$change_type${RESET}"
+  info "Nova Versão:   ${BOLD}${GREEN}$new_version${RESET}"
+  echo ""
+
+  # Verificar se tag já existe
+  if git tag -l "v$new_version" | grep -q .; then
+    abort "Tag v$new_version já existe. Escolha outra versão."
+  fi
+
+  # Etapa 4 — Release Notes
+  sep
+  label "Release Notes"
+  info "Informe as alterações desta versão ${DIM}(linha vazia para finalizar)${RESET}:"
+  echo ""
+
+  local notes=()
+  while true; do
+    local note
+    note=$(ask "item")
+    [[ -z "$note" ]] && break
+    notes+=("$note")
+  done
+  [[ ${#notes[@]} -eq 0 ]] && abort "Ao menos uma nota de release é obrigatória."
+
+  # Etapa 5 — Atualizar arquivos de versão?
+  echo ""
+  sep
+  echo ""
+  echo -e "  ${BOLD}Deseja atualizar automaticamente os arquivos de versão?${RESET}"
+  echo ""
+  echo -e "  ${CYAN}[1]${RESET} Sim"
+  echo -e "  ${CYAN}[2]${RESET} Não"
+  echo ""
+  local update_choice
+  update_choice=$(ask "Opção")
+
+  local all_candidates=(
+    "package.json" "package-lock.json" "composer.json" "composer.lock"
+    "pom.xml" "build.gradle" "gradle.properties" "pyproject.toml"
+    "setup.py" "Cargo.toml" "VERSION" "version.txt" ".env"
+    "config/version.php" "app.json" "manifest.json"
+  )
+  local version_files=()
+  for f in "${all_candidates[@]}"; do
+    [[ -f "$f" ]] && version_files+=("$f")
+  done
+
+  # Etapa 6 — Release no Git?
+  echo ""
+  echo -e "  ${BOLD}Deseja gerar uma Release no Git?${RESET}"
+  echo ""
+  echo -e "  ${CYAN}[1]${RESET} Sim"
+  echo -e "  ${CYAN}[2]${RESET} Não"
+  echo ""
+  local git_release_choice
+  git_release_choice=$(ask "Opção")
+  local git_release=false
+  [[ "$git_release_choice" == "1" ]] && git_release=true
+
+  # Etapa 7 — Branch alvo
+  local current_branch target_branch
+  current_branch=$(get_current_branch)
+  echo ""
+  info "Branch atual: ${BOLD}${CYAN}$current_branch${RESET}"
+  echo ""
+  local branch_input
+  branch_input=$(ask "Branch alvo da release ${DIM}(Enter para usar a atual)${RESET}")
+  [[ -z "$branch_input" ]] && target_branch="$current_branch" || target_branch="$branch_input"
+
+  echo ""
+  info "Branch selecionada: ${BOLD}${CYAN}$target_branch${RESET}"
+  echo ""
+  confirm "Deseja continuar?" || { echo ""; warn "Operação cancelada."; echo ""; exit 0; }
+
+  # Etapa 9 — Resumo
+  echo ""
+  sep
+  label "Resumo da Release"
+  sep
+  echo ""
+  echo -e "  ${BOLD}Versão Atual:${RESET}      $current_version"
+  echo -e "  ${BOLD}Nova Versão:${RESET}       ${GREEN}$new_version${RESET}"
+  echo -e "  ${BOLD}Tipo:${RESET}              $change_type"
+  echo -e "  ${BOLD}Branch:${RESET}            $target_branch"
+  echo -e "  ${BOLD}Tag:${RESET}               ${CYAN}v$new_version${RESET}"
+  echo -e "  ${BOLD}Release Git:${RESET}       $( [[ "$git_release" == true ]] && echo 'Sim' || echo 'Não' )"
+  echo ""
+  echo -e "  ${BOLD}Arquivos a atualizar:${RESET}"
+  if [[ "$update_choice" == "1" ]] && [[ ${#version_files[@]} -gt 0 ]]; then
+    for f in "${version_files[@]}"; do
+      echo -e "  ${DIM}·${RESET} $f"
+    done
+  fi
+  echo -e "  ${DIM}·${RESET} changelog.md"
+  echo ""
+  echo -e "  ${BOLD}Release Notes:${RESET}"
+  for note in "${notes[@]}"; do
+    echo -e "  ${DIM}·${RESET} $note"
+  done
+  echo ""
+  sep
+  echo ""
+
+  # Etapa 10 — Confirmação final
+  confirm "Deseja prosseguir?" || {
+    echo ""
+    warn "Processo cancelado. Nenhuma alteração foi realizada."
+    echo ""
+    exit 0
+  }
+
+  echo ""
+  sep
+
+  # Criar backups
+  local backed_up=()
+  [[ -f "changelog.md" ]] && { cp changelog.md changelog.md.nit.bak; backed_up+=("changelog.md"); }
+  if [[ "$update_choice" == "1" ]]; then
+    for f in "${version_files[@]}"; do
+      cp "$f" "$f.nit.bak"
+      backed_up+=("$f")
+    done
+  fi
+
+  # Rollback em caso de erro
+  rollback_version() {
+    error "Erro detectado. Revertendo alterações..."
+    for f in "${backed_up[@]}"; do
+      if [[ -f "$f.nit.bak" ]]; then
+        mv "$f.nit.bak" "$f"
+        warn "Restaurado: $f"
+      fi
+    done
+    git tag -d "v$new_version" 2>/dev/null || true
+    if git log --oneline -1 2>/dev/null | grep -q "chore(release): v$new_version"; then
+      git reset --soft HEAD~1
+      warn "Commit de release desfeito."
+    fi
+    echo ""
+    error "Processo cancelado. Todas as alterações foram revertidas."
+    echo ""
+  }
+
+  # Atualizar changelog
+  info "Atualizando changelog.md..."
+  update_changelog "$new_version" "$change_type" "${notes[@]}" || { rollback_version; exit 1; }
+  success "changelog.md atualizado."
+
+  # Atualizar arquivos de versão
+  if [[ "$update_choice" == "1" ]] && [[ ${#version_files[@]} -gt 0 ]]; then
+    info "Atualizando arquivos de versão..."
+    for f in "${version_files[@]}"; do
+      update_version_in_file "$f" "$current_version" "$new_version" && success "$f" || { rollback_version; exit 1; }
+    done
+  fi
+
+  # Operações Git
+  if [[ "$git_release" == true ]]; then
+    info "Adicionando arquivos..."
+    git add . || { rollback_version; exit 1; }
+    info "Criando commit de release..."
+    git commit -m "chore(release): v$new_version" || { rollback_version; exit 1; }
+    info "Criando tag v$new_version..."
+    git tag -a "v$new_version" -m "Release v$new_version" || { rollback_version; exit 1; }
+    info "Enviando branch ${target_branch}..."
+    git push origin "$target_branch" || { rollback_version; exit 1; }
+    info "Enviando tag v$new_version..."
+    git push origin "v$new_version" || { rollback_version; exit 1; }
+
+    # GitHub / GitLab CLI
+    if command -v gh > /dev/null 2>&1; then
+      echo ""
+      if confirm "Criar GitHub Release via gh CLI?"; then
+        local release_body=""
+        for note in "${notes[@]}"; do
+          release_body+="- $note"$'\n'
+        done
+        gh release create "v$new_version" \
+          --title "Release v$new_version" \
+          --notes "$release_body" \
+          --target "$target_branch" \
+          && success "GitHub Release criada."
+      fi
+    elif command -v glab > /dev/null 2>&1; then
+      echo ""
+      if confirm "Criar GitLab Release via glab CLI?"; then
+        glab release create "v$new_version" && success "GitLab Release criada."
+      fi
+    fi
+  else
+    echo ""
+    if confirm "Commitar os arquivos atualizados?"; then
+      git add .
+      git commit -m "chore(release): v$new_version" && success "Commit criado."
+      git tag -a "v$new_version" -m "Release v$new_version" && success "Tag v$new_version criada."
+    fi
+  fi
+
+  # Limpar backups
+  for f in "${backed_up[@]}"; do
+    rm -f "$f.nit.bak"
+  done
+
+  echo ""
+  sep
+  success "Release ${BOLD}v$new_version${RESET} concluída com sucesso!"
+  echo ""
+}
+
+# ========================
 # Main
 # ========================
 
@@ -1027,6 +1408,10 @@ case "$1" in
     switch_flow
   ;;
 
+  version|release)
+    version_flow
+  ;;
+
   *)
     echo ""
     echo -e "  ${BOLD}${CYAN}NIT${RESET}  ${DIM}CLI GIT Workflow Simplify${RESET}"
@@ -1071,6 +1456,9 @@ case "$1" in
     echo -e "  ${GREEN}nit contributors${RESET}           lista de contribuidores  ${DIM}(alias: contrib)${RESET}"
     echo -e "  ${GREEN}nit history${RESET}  ${DIM}(alias: log)${RESET}  log gráfico"
     echo -e "  ${GREEN}nit tag${RESET} ${DIM}[list|create|delete]${RESET}"
+
+    label "versionamento"
+    echo -e "  ${GREEN}nit release${RESET}                gerenciar versão e publicar release  ${DIM}(alias: version)${RESET}"
 
     label "histórico"
     echo -e "  ${GREEN}nit cherry${RESET}                 cherry-pick assistido"
