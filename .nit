@@ -866,6 +866,45 @@ switch_flow() {
 # Version / Release
 # ========================
 
+# --- Helpers de estratégia de versão ---
+
+detect_version_strategy() {
+  local version="$1"
+  if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "semver"
+  elif [[ "$version" =~ ^[0-9]{2}\.[0-9]{2}$ ]]; then
+    echo "calver"
+  elif [[ "$version" =~ ^Release[[:space:]][0-9]{4}\.[0-9]+$ ]]; then
+    echo "release"
+  else
+    echo "unknown"
+  fi
+}
+
+increment_calver() {
+  # Sempre usa o mês atual; incrementa patch implícito se já existir esse mês
+  local today
+  today=$(date +%y.%m)
+  echo "$today"
+}
+
+increment_release_ver() {
+  local version="$1"
+  local bump="$2"
+  local year num
+  year=$(echo "$version" | grep -o '[0-9]\{4\}')
+  num=$(echo "$version" | grep -o '\.[0-9]*$' | tr -d '.')
+  num=${num:-0}
+  local cur_year
+  cur_year=$(date +%Y)
+  if [[ "$bump" == "major" ]] || [[ "$year" != "$cur_year" ]]; then
+    echo "Release ${cur_year}.1"
+  else
+    ((num++))
+    echo "Release ${year}.${num}"
+  fi
+}
+
 get_current_version() {
   local version=""
   if [[ -f "package.json" ]]; then
@@ -981,6 +1020,30 @@ version_flow() {
   else
     info "Versão atual encontrada: ${BOLD}${CYAN}$current_version${RESET}"
   fi
+
+  local detected_strategy
+  detected_strategy=$(detect_version_strategy "$current_version")
+  info "Estratégia detectada: ${BOLD}$detected_strategy${RESET}"
+  echo ""
+
+  # Selecionar estratégia de versionamento
+  echo -e "  ${BOLD}Estratégia de versionamento:${RESET}"
+  echo ""
+  echo -e "  ${CYAN}[1]${RESET} SemVer   ${DIM}(MAJOR.MINOR.PATCH — ex: 1.5.0)${RESET}"
+  echo -e "  ${CYAN}[2]${RESET} CalVer   ${DIM}(YY.MM — ex: 26.06)${RESET}"
+  echo -e "  ${CYAN}[3]${RESET} Release  ${DIM}(Release 2026.N — ex: Release 2026.2)${RESET}"
+  echo ""
+
+  local strategy_choice version_strategy
+  strategy_choice=$(ask "Estratégia ${DIM}(Enter para usar detectada: $detected_strategy)${RESET}")
+  case "$strategy_choice" in
+    1) version_strategy="semver" ;;
+    2) version_strategy="calver" ;;
+    3) version_strategy="release" ;;
+    *) version_strategy="$detected_strategy"
+       [[ "$version_strategy" == "unknown" ]] && version_strategy="semver"
+       ;;
+  esac
   echo ""
 
   # Etapa 3 — Tipo da alteração (antes para cálculo automático)
@@ -1025,11 +1088,21 @@ version_flow() {
     new_version=$(ask "Informe a versão")
     [[ -z "$new_version" ]] && abort "Versão não pode ser vazia."
   else
-    if [[ "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-      new_version=$(increment_semver "$current_version" "$bump_type")
-    else
-      new_version=$(increment_semver "0.0.0" "$bump_type")
-    fi
+    case "$version_strategy" in
+      semver)
+        if [[ "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          new_version=$(increment_semver "$current_version" "$bump_type")
+        else
+          new_version=$(increment_semver "0.0.0" "$bump_type")
+        fi
+        ;;
+      calver)
+        new_version=$(increment_calver)
+        ;;
+      release)
+        new_version=$(increment_release_ver "$current_version" "$bump_type")
+        ;;
+    esac
   fi
 
   echo ""
@@ -1039,8 +1112,14 @@ version_flow() {
   echo ""
 
   # Verificar se tag já existe
-  if git tag -l "v$new_version" | grep -q .; then
-    abort "Tag v$new_version já existe. Escolha outra versão."
+  local tag_name
+  if [[ "$version_strategy" == "release" ]]; then
+    tag_name=$(echo "$new_version" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
+  else
+    tag_name="v$new_version"
+  fi
+  if git tag -l "$tag_name" | grep -q .; then
+    abort "Tag $tag_name já existe. Escolha outra versão."
   fi
 
   # Etapa 4 — Release Notes
@@ -1118,7 +1197,8 @@ version_flow() {
   echo -e "  ${BOLD}Nova Versão:${RESET}       ${GREEN}$new_version${RESET}"
   echo -e "  ${BOLD}Tipo:${RESET}              $change_type"
   echo -e "  ${BOLD}Branch:${RESET}            $target_branch"
-  echo -e "  ${BOLD}Tag:${RESET}               ${CYAN}v$new_version${RESET}"
+  echo -e "  ${BOLD}Estratégia:${RESET}        $version_strategy"
+  echo -e "  ${BOLD}Tag:${RESET}               ${CYAN}$tag_name${RESET}"
   echo -e "  ${BOLD}Release Git:${RESET}       $( [[ "$git_release" == true ]] && echo 'Sim' || echo 'Não' )"
   echo ""
   echo -e "  ${BOLD}Arquivos a atualizar:${RESET}"
@@ -1167,8 +1247,8 @@ version_flow() {
         warn "Restaurado: $f"
       fi
     done
-    git tag -d "v$new_version" 2>/dev/null || true
-    if git log --oneline -1 2>/dev/null | grep -q "chore(release): v$new_version"; then
+    git tag -d "$tag_name" 2>/dev/null || true
+    if git log --oneline -1 2>/dev/null | grep -q "chore(release): $tag_name"; then
       git reset --soft HEAD~1
       warn "Commit de release desfeito."
     fi
@@ -1195,13 +1275,13 @@ version_flow() {
     info "Adicionando arquivos..."
     git add . || { rollback_version; exit 1; }
     info "Criando commit de release..."
-    git commit -m "chore(release): v$new_version" || { rollback_version; exit 1; }
-    info "Criando tag v$new_version..."
-    git tag -a "v$new_version" -m "Release v$new_version" || { rollback_version; exit 1; }
+    git commit -m "chore(release): $tag_name" || { rollback_version; exit 1; }
+    info "Criando tag $tag_name..."
+    git tag -a "$tag_name" -m "Release $new_version" || { rollback_version; exit 1; }
     info "Enviando branch ${target_branch}..."
     git push origin "$target_branch" || { rollback_version; exit 1; }
-    info "Enviando tag v$new_version..."
-    git push origin "v$new_version" || { rollback_version; exit 1; }
+    info "Enviando tag $tag_name..."
+    git push origin "$tag_name" || { rollback_version; exit 1; }
 
     # GitHub / GitLab CLI
     if command -v gh > /dev/null 2>&1; then
@@ -1211,8 +1291,8 @@ version_flow() {
         for note in "${notes[@]}"; do
           release_body+="- $note"$'\n'
         done
-        gh release create "v$new_version" \
-          --title "Release v$new_version" \
+        gh release create "$tag_name" \
+          --title "Release $new_version" \
           --notes "$release_body" \
           --target "$target_branch" \
           && success "GitHub Release criada."
@@ -1227,8 +1307,8 @@ version_flow() {
     echo ""
     if confirm "Commitar os arquivos atualizados?"; then
       git add .
-      git commit -m "chore(release): v$new_version" && success "Commit criado."
-      git tag -a "v$new_version" -m "Release v$new_version" && success "Tag v$new_version criada."
+      git commit -m "chore(release): $tag_name" && success "Commit criado."
+      git tag -a "$tag_name" -m "Release $new_version" && success "Tag $tag_name criada."
     fi
   fi
 
@@ -1239,8 +1319,242 @@ version_flow() {
 
   echo ""
   sep
-  success "Release ${BOLD}v$new_version${RESET} concluída com sucesso!"
+  success "Release ${BOLD}$new_version${RESET} concluída com sucesso!"
   echo ""
+}
+
+# ========================
+# Version Current
+# ========================
+
+version_current_flow() {
+  header "version current"
+  local version
+  version=$(get_current_version)
+  echo ""
+  if [[ -z "$version" ]]; then
+    warn "Nenhuma versão encontrada nos arquivos do projeto."
+  else
+    local strategy
+    strategy=$(detect_version_strategy "$version")
+    echo -e "  ${BOLD}Versão:${RESET}    ${GREEN}${BOLD}$version${RESET}"
+    echo -e "  ${BOLD}Estratégia:${RESET} ${DIM}$strategy${RESET}"
+  fi
+  echo ""
+}
+
+# ========================
+# Version History
+# ========================
+
+version_history_flow() {
+  header "version history"
+  echo ""
+
+  echo -e "  ${BOLD}Tags de versão:${RESET}"
+  echo ""
+  local tags
+  tags=$(git tag --sort=-v:refname | head -20)
+  if [[ -z "$tags" ]]; then
+    info "Nenhuma tag encontrada."
+  else
+    while IFS= read -r t; do
+      local date_str
+      date_str=$(git log -1 --format="%ci" "$t" 2>/dev/null | cut -d' ' -f1)
+      printf "  ${CYAN}%-20s${RESET} ${DIM}%s${RESET}\n" "$t" "$date_str"
+    done <<< "$tags"
+  fi
+  echo ""
+
+  if [[ -f "changelog.md" ]]; then
+    echo -e "  ${BOLD}Últimas entradas do changelog:${RESET}"
+    echo ""
+    grep -E "^## \[" changelog.md | head -10 | while IFS= read -r line; do
+      echo -e "  ${DIM}·${RESET} $line"
+    done
+    echo ""
+  fi
+}
+
+# ========================
+# Version Bump (rápido)
+# ========================
+
+version_bump_flow() {
+  local bump_arg="${1:-}"
+  header "version bump"
+
+  local current_version
+  current_version=$(get_current_version)
+  if [[ -z "$current_version" ]]; then
+    warn "Nenhuma versão encontrada. Usando 0.0.0."
+    current_version="0.0.0"
+  fi
+
+  local strategy
+  strategy=$(detect_version_strategy "$current_version")
+
+  if [[ -z "$bump_arg" ]]; then
+    echo ""
+    info "Versão atual: ${BOLD}${CYAN}$current_version${RESET} ${DIM}($strategy)${RESET}"
+    echo ""
+    echo -e "  ${CYAN}[1]${RESET} patch ${DIM}— correção (ex: 1.2.3 → 1.2.4)${RESET}"
+    echo -e "  ${CYAN}[2]${RESET} minor ${DIM}— feature  (ex: 1.2.3 → 1.3.0)${RESET}"
+    echo -e "  ${CYAN}[3]${RESET} major ${DIM}— breaking (ex: 1.2.3 → 2.0.0)${RESET}"
+    echo ""
+    local bc
+    bc=$(ask "Tipo de bump")
+    case "$bc" in
+      1) bump_arg="patch" ;;
+      2) bump_arg="minor" ;;
+      3) bump_arg="major" ;;
+      patch|minor|major) bump_arg="$bc" ;;
+      *) abort "Opção inválida." ;;
+    esac
+  fi
+
+  [[ "$bump_arg" =~ ^(patch|minor|major)$ ]] || abort "Uso: nit version bump patch|minor|major"
+
+  local new_version
+  case "$strategy" in
+    semver)
+      if [[ "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        new_version=$(increment_semver "$current_version" "$bump_arg")
+      else
+        new_version=$(increment_semver "0.0.0" "$bump_arg")
+      fi
+      ;;
+    calver)
+      new_version=$(increment_calver)
+      ;;
+    release)
+      new_version=$(increment_release_ver "$current_version" "$bump_arg")
+      ;;
+    *)
+      new_version=$(increment_semver "0.0.0" "$bump_arg")
+      ;;
+  esac
+
+  echo ""
+  info "Versão atual: ${BOLD}$current_version${RESET}"
+  info "Nova versão:  ${BOLD}${GREEN}$new_version${RESET}"
+  echo ""
+  confirm "Atualizar versão nos arquivos e criar commit+tag?" || { warn "Cancelado."; echo ""; exit 0; }
+
+  local all_candidates=(
+    "package.json" "package-lock.json" "composer.json" "composer.lock"
+    "pom.xml" "build.gradle" "gradle.properties" "pyproject.toml"
+    "setup.py" "Cargo.toml" "VERSION" "version.txt" ".env"
+    "config/version.php" "app.json" "manifest.json"
+  )
+  echo ""
+  local updated=()
+  for f in "${all_candidates[@]}"; do
+    if [[ -f "$f" ]]; then
+      update_version_in_file "$f" "$current_version" "$new_version" && success "$f" && updated+=("$f")
+    fi
+  done
+  update_changelog "$new_version" "bump" "Bump $bump_arg: $current_version → $new_version"
+  success "changelog.md"
+
+  local tag_name
+  if [[ "$strategy" == "release" ]]; then
+    tag_name=$(echo "$new_version" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
+  else
+    tag_name="v$new_version"
+  fi
+
+  git add .
+  git commit -m "chore(release): $tag_name" && success "Commit criado."
+  git tag -a "$tag_name" -m "Release $new_version" && success "Tag $tag_name criada."
+  echo ""
+
+  if confirm "Fazer push da branch e da tag?"; then
+    local branch
+    branch=$(get_current_branch)
+    git push origin "$branch" && git push origin "$tag_name" && success "Push realizado."
+  fi
+  echo ""
+}
+
+# ========================
+# Changelog viewer
+# ========================
+
+changelog_flow() {
+  local sub="${1:-}"
+  case "$sub" in
+    show|"")
+      header "changelog"
+      echo ""
+      if [[ ! -f "changelog.md" ]]; then
+        warn "Arquivo changelog.md não encontrado."
+        echo ""
+        if confirm "Deseja criar um changelog vazio?"; then
+          {
+            echo "# Changelog"
+            echo ""
+            echo "Todas as alterações relevantes deste projeto serão documentadas neste arquivo."
+            echo ""
+          } > changelog.md
+          success "changelog.md criado."
+        fi
+        echo ""
+        return
+      fi
+      cat changelog.md
+      echo ""
+      ;;
+    versions)
+      header "changelog versions"
+      echo ""
+      if [[ ! -f "changelog.md" ]]; then
+        warn "changelog.md não encontrado."
+        echo ""
+        return
+      fi
+      grep -E "^## \[" changelog.md | while IFS= read -r line; do
+        echo -e "  ${CYAN}·${RESET} $line"
+      done
+      echo ""
+      ;;
+    search)
+      header "changelog search"
+      echo ""
+      local term
+      term=$(ask "Buscar por")
+      [[ -z "$term" ]] && abort "Termo não pode ser vazio."
+      echo ""
+      if [[ ! -f "changelog.md" ]]; then
+        warn "changelog.md não encontrado."; echo ""; return
+      fi
+      local results
+      results=$(grep -in "$term" changelog.md)
+      if [[ -z "$results" ]]; then
+        info "Nenhum resultado para '${BOLD}$term${RESET}'."
+      else
+        echo "$results" | while IFS= read -r line; do
+          echo -e "  ${DIM}$line${RESET}"
+        done
+      fi
+      echo ""
+      ;;
+    last)
+      header "changelog last"
+      echo ""
+      if [[ ! -f "changelog.md" ]]; then
+        warn "changelog.md não encontrado."; echo ""; return
+      fi
+      # Exibe apenas a última entrada
+      awk '/^## \[/{if(found) exit; found=1} found{print}' changelog.md
+      echo ""
+      ;;
+    *)
+      error "Subcomando desconhecido: 'changelog $sub'"
+      echo -e "  ${DIM}Uso: nit changelog [show|versions|search|last]${RESET}\n"
+      exit 1
+      ;;
+  esac
 }
 
 # ========================
@@ -1409,7 +1723,16 @@ case "$1" in
   ;;
 
   version|release)
-    version_flow
+    case "$2" in
+      current) version_current_flow ;;
+      history) version_history_flow ;;
+      bump)    version_bump_flow "$3" ;;
+      *)       version_flow ;;
+    esac
+  ;;
+
+  changelog)
+    changelog_flow "$2"
   ;;
 
   *)
@@ -1458,7 +1781,11 @@ case "$1" in
     echo -e "  ${GREEN}nit tag${RESET} ${DIM}[list|create|delete]${RESET}"
 
     label "versionamento"
-    echo -e "  ${GREEN}nit release${RESET}                gerenciar versão e publicar release  ${DIM}(alias: version)${RESET}"
+    echo -e "  ${GREEN}nit release${RESET}                      wizard completo de release  ${DIM}(alias: version)${RESET}"
+    echo -e "  ${GREEN}nit version current${RESET}              exibir versão atual do projeto"
+    echo -e "  ${GREEN}nit version history${RESET}              histórico de versões (tags + changelog)"
+    echo -e "  ${GREEN}nit version bump${RESET} ${DIM}[patch|minor|major]${RESET}  bump rápido sem wizard"
+    echo -e "  ${GREEN}nit changelog${RESET} ${DIM}[show|versions|search|last]${RESET}"
 
     label "histórico"
     echo -e "  ${GREEN}nit cherry${RESET}                 cherry-pick assistido"
