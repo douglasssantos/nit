@@ -983,7 +983,7 @@ update_changelog() {
   fi
 
   local entry
-  entry="## [${new_ver}] - ${today}\n\n### Tipo\n${change_type}\n\n### Alterações\n"
+  entry="## [${new_ver}] - ${today}\n\n### Alterações\n"
   for note in "${notes[@]}"; do
     entry+="- ${note}\n"
   done
