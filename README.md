@@ -343,7 +343,120 @@ O `nit info` exibe o status dos arquivos com cores por tipo:
 
 ---
 
-## Operações avançadas
+## Versionamento e Releases
+
+O nit possui um sistema completo de gerenciamento de versões com suporte a três estratégias de versionamento.
+
+### Estratégias suportadas
+
+| Estratégia | Formato             | Exemplo          |
+|------------|---------------------|------------------|
+| SemVer     | `MAJOR.MINOR.PATCH` | `1.5.0`          |
+| CalVer     | `YY.MM`             | `26.06`          |
+| Release    | `Release YYYY.N`    | `Release 2026.2` |
+
+A estratégia é detectada automaticamente com base na versão atual do projeto.
+
+### Wizard completo de release
+
+```bash
+nit release
+nit version   # alias
+```
+
+Fluxo guiado com 10 etapas:
+
+1. Detecta a versão atual nos arquivos do projeto (`package.json`, `composer.json`, `VERSION`, etc.)
+2. Identifica e permite trocar a estratégia de versionamento
+3. Solicita o tipo da alteração para calcular a nova versão automaticamente
+4. Permite informar a versão manualmente ou calculá-la com base no tipo
+5. Coleta release notes (múltiplos itens, linha vazia para finalizar)
+6. Atualiza automaticamente todos os arquivos de versão encontrados
+7. Pergunta se deseja gerar uma release no Git
+8. Permite definir a branch alvo
+9. Exibe um resumo completo antes de qualquer alteração
+10. Confirma e executa — ou cancela com rollback completo
+
+**Tipos de alteração e incremento automático:**
+
+| Tipo             | Incremento |
+|------------------|------------|
+| `bugfix`         | PATCH      |
+| `hotfix`         | PATCH      |
+| `enhancement`    | MINOR      |
+| `feature`        | MINOR      |
+| `project`        | MAJOR      |
+| `new-version`    | MAJOR      |
+| `change-breaking`| MAJOR      |
+
+**Arquivos atualizados automaticamente** (quando existirem):
+`package.json`, `package-lock.json`, `composer.json`, `composer.lock`, `pom.xml`, `build.gradle`, `gradle.properties`, `pyproject.toml`, `setup.py`, `Cargo.toml`, `VERSION`, `version.txt`, `.env`, `config/version.php`, `app.json`, `manifest.json`, `changelog.md`
+
+**Execução ao confirmar:**
+```bash
+git add .
+git commit -m "chore(release): v1.5.0"
+git tag -a v1.5.0 -m "Release 1.5.0"
+git push origin <branch>
+git push origin v1.5.0
+# + gh release create (se gh CLI disponível)
+```
+
+**Rollback automático:** em caso de erro ou cancelamento, todos os arquivos alterados são restaurados e commit/tag são removidos.
+
+---
+
+### Exibir versão atual
+
+```bash
+nit version current
+```
+
+Exibe a versão detectada nos arquivos do projeto e a estratégia identificada (semver, calver ou release), sem abrir o wizard.
+
+---
+
+### Histórico de versões
+
+```bash
+nit version history
+```
+
+Lista as tags de versão existentes com suas datas e as últimas entradas do `changelog.md`.
+
+---
+
+### Bump rápido
+
+```bash
+nit version bump patch
+nit version bump minor
+nit version bump major
+nit version bump         # seleção interativa
+```
+
+Incrementa a versão diretamente sem passar pelo wizard completo:
+
+- Atualiza todos os arquivos de versão encontrados
+- Adiciona entrada no `changelog.md`
+- Cria commit `chore(release): vX.Y.Z` e tag
+- Pergunta se deseja fazer push da branch e da tag
+
+---
+
+## Changelog
+
+```bash
+nit changelog            # exibe o conteúdo completo
+nit changelog show       # idem
+nit changelog versions   # lista somente as entradas de versão
+nit changelog search     # busca por termo no changelog
+nit changelog last       # exibe apenas a entrada mais recente
+```
+
+Se o `changelog.md` não existir, `nit changelog` oferece criar o arquivo automaticamente.
+
+---
 
 ### Cherry-pick assistido
 
@@ -447,6 +560,11 @@ nit pr
 | `nit cherry` | — | Cherry-pick assistido |
 | `nit reset` | — | Reset seguro |
 | `nit revert` | — | Reverter commit |
+| `nit release` | `version` | Wizard completo de release |
+| `nit version current` | — | Exibir versão atual do projeto |
+| `nit version history` | — | Histórico de versões (tags + changelog) |
+| `nit version bump [patch\|minor\|major]` | — | Bump rápido sem wizard |
+| `nit changelog [show\|versions\|search\|last]` | — | Visualizar e navegar pelo changelog |
 
 ---
 
